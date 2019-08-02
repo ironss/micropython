@@ -35,6 +35,7 @@
 #include "py/runtime.h"
 #include "py/mperrno.h"
 #include "extmod/vfs_littlefs.h"
+#include "lib/littlefs/lfs.h"
 
 #include "py/lexer.h"
 #include "py/obj.h"
@@ -54,24 +55,32 @@ typedef struct _fs_user_mount_t {
             mp_obj_t count[2];
         } old;
     } u;
-//    FATFS fatfs;
+    lfs_t lfs;
 } fs_user_mount_t;
 #define mp_obj_littlefs_vfs_t fs_user_mount_t
 
+
+static int lfserr_to_errno(int lfserr) {
+    return lfserr;
+}
+
+
 STATIC mp_import_stat_t littlefs_vfs_import_stat(void *vfs_in, const char *path) {
-#if 0
     fs_user_mount_t *vfs = vfs_in;
-    FILINFO fno;
-    assert(vfs != NULL);
-    FRESULT res = f_stat(&vfs->fatfs, path, &fno);
-    if (res == FR_OK) {
-        if ((fno.fattrib & AM_DIR) != 0) {
-            return MP_IMPORT_STAT_DIR;
-        } else {
-            return MP_IMPORT_STAT_FILE;
-        }
+
+    int err;
+    struct lfs_info info;
+    
+    err = lfs_stat(&vfs->lfs, path, &info);
+    if (err != LFS_ERR_OK) {
+        return MP_IMPORT_STAT_NO_EXIST;
     }
-#endif
+    if (info.type == LFS_TYPE_REG) {
+        return MP_IMPORT_STAT_FILE;
+    } else {
+        return MP_IMPORT_STAT_DIR;
+    }
+
     return MP_IMPORT_STAT_NO_EXIST;
 }
 
@@ -114,8 +123,11 @@ STATIC mp_obj_t littlefs_vfs_make_new(const mp_obj_type_t *type, size_t n_args, 
 #if _FS_REENTRANT
 STATIC mp_obj_t littlefs_vfs_del(mp_obj_t self_in) {
     mp_obj_littlefs_vfs_t *self = MP_OBJ_TO_PTR(self_in);
-    // f_umount only needs to be called to release the sync object
-    f_umount(&self->fatfs);
+    
+    int err;
+    err = lfs_unmount(&self->lfs);
+    (void)err;
+
     return mp_const_none;
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(littlefs_vfs_del_obj, littlefs_vfs_del);
@@ -225,68 +237,64 @@ STATIC mp_obj_t littlefs_vfs_ilistdir_func(size_t n_args, const mp_obj_t *args) 
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(littlefs_vfs_ilistdir_obj, 1, 2, littlefs_vfs_ilistdir_func);
 
-STATIC mp_obj_t littlefs_vfs_remove_internal(mp_obj_t vfs_in, mp_obj_t path_in, mp_int_t attr) {
+STATIC mp_obj_t littlefs_vfs_rmdir(mp_obj_t vfs_in, mp_obj_t path_in) {
     mp_obj_littlefs_vfs_t *self = MP_OBJ_TO_PTR(vfs_in);
     const char *path = mp_obj_str_get_str(path_in);
 
-#if 0
-    FILINFO fno;
-    FRESULT res = f_stat(&self->fatfs, path, &fno);
-
-    if (res != FR_OK) {
-        mp_raise_OSError(fresult_to_errno_table[res]);
+    int err;
+    struct lfs_info info;
+    
+    err = lfs_stat(&self->lfs, path, &info);
+    if (err != LFS_ERR_OK) {
+        mp_raise_OSError(lfserr_to_errno(err));
+    }
+    if (info.type != LFS_TYPE_DIR) {
+        mp_raise_OSError(MP_ENOTDIR);
     }
 
-    // check if path is a file or directory
-    if ((fno.fattrib & AM_DIR) == attr) {
-        res = f_unlink(&self->fatfs, path);
-
-        if (res != FR_OK) {
-            mp_raise_OSError(fresult_to_errno_table[res]);
-        }
-        return mp_const_none;
-    } else {
-        mp_raise_OSError(attr ? MP_ENOTDIR : MP_EISDIR);
+    err = lfs_remove(&self->lfs, path);
+    if (err != LFS_ERR_OK) {
+        mp_raise_OSError(lfserr_to_errno(err));
     }
-#endif
-    (void)self;
-    (void)path;
 
     return mp_const_none;
 }
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(littlefs_vfs_rmdir_obj, littlefs_vfs_rmdir);
 
 STATIC mp_obj_t littlefs_vfs_remove(mp_obj_t vfs_in, mp_obj_t path_in) {
-    return littlefs_vfs_remove_internal(vfs_in, path_in, 0); // 0 == file attribute
+    mp_obj_littlefs_vfs_t *self = MP_OBJ_TO_PTR(vfs_in);
+    const char *path = mp_obj_str_get_str(path_in);
+
+    int err;
+    struct lfs_info info;
+    
+    err = lfs_stat(&self->lfs, path, &info);
+    if (err != LFS_ERR_OK) {
+        mp_raise_OSError(lfserr_to_errno(err));
+    }
+    if (info.type != LFS_TYPE_REG) {
+        mp_raise_OSError(MP_EISDIR);
+    }
+
+    err = lfs_remove(&self->lfs, path);
+    if (err != LFS_ERR_OK) {
+        mp_raise_OSError(lfserr_to_errno(err));
+    }
+
+    return mp_const_none;
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_2(littlefs_vfs_remove_obj, littlefs_vfs_remove);
-
-STATIC mp_obj_t littlefs_vfs_rmdir(mp_obj_t vfs_in, mp_obj_t path_in) {
-    return littlefs_vfs_remove_internal(vfs_in, path_in, 1);
-}
-STATIC MP_DEFINE_CONST_FUN_OBJ_2(littlefs_vfs_rmdir_obj, littlefs_vfs_rmdir);
 
 STATIC mp_obj_t littlefs_vfs_rename(mp_obj_t vfs_in, mp_obj_t path_in, mp_obj_t path_out) {
     mp_obj_littlefs_vfs_t *self = MP_OBJ_TO_PTR(vfs_in);
     const char *old_path = mp_obj_str_get_str(path_in);
     const char *new_path = mp_obj_str_get_str(path_out);
     
-    (void)self;
-    (void)old_path;
-    (void)new_path;
-#if 0
-    FRESULT res = f_rename(&self->fatfs, old_path, new_path);
-    if (res == FR_EXIST) {
-        // if new_path exists then try removing it (but only if it's a file)
-        fat_vfs_remove_internal(vfs_in, path_out, 0); // 0 == file attribute
-        // try to rename again
-        res = f_rename(&self->fatfs, old_path, new_path);
+    int err;
+    err = lfs_rename(&self->lfs, old_path, new_path);
+    if (err != LFS_ERR_OK) {
+        mp_raise_OSError(lfserr_to_errno(err));
     }
-    if (res == FR_OK) {
-        return mp_const_none;
-    } else {
-        mp_raise_OSError(fresult_to_errno_table[res]);
-    }
-#endif
 
     return mp_const_none;
 }
@@ -296,22 +304,16 @@ STATIC mp_obj_t littlefs_vfs_mkdir(mp_obj_t vfs_in, mp_obj_t path_o) {
     mp_obj_littlefs_vfs_t *self = MP_OBJ_TO_PTR(vfs_in);
     const char *path = mp_obj_str_get_str(path_o);
     
-    (void)self;
-    (void)path;
-#if 0
-    FRESULT res = f_mkdir(&self->fatfs, path);
-    if (res == FR_OK) {
-        return mp_const_none;
-    } else {
-        mp_raise_OSError(fresult_to_errno_table[res]);
+    int err;
+    err = lfs_mkdir(&self->lfs, path);
+    if (err != LFS_ERR_OK) {
+        mp_raise_OSError(lfserr_to_errno(err));
     }
-#endif
 
     return mp_const_none;
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_2(littlefs_vfs_mkdir_obj, littlefs_vfs_mkdir);
 
-/// Change current directory.
 STATIC mp_obj_t littlefs_vfs_chdir(mp_obj_t vfs_in, mp_obj_t path_in) {
     mp_obj_littlefs_vfs_t *self = MP_OBJ_TO_PTR(vfs_in);
     const char *path;
@@ -331,7 +333,6 @@ STATIC mp_obj_t littlefs_vfs_chdir(mp_obj_t vfs_in, mp_obj_t path_in) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_2(littlefs_vfs_chdir_obj, littlefs_vfs_chdir);
 
-/// Get the current directory.
 STATIC mp_obj_t littlefs_vfs_getcwd(mp_obj_t vfs_in) {
     mp_obj_littlefs_vfs_t *self = MP_OBJ_TO_PTR(vfs_in);
     char buf[MICROPY_ALLOC_PATH_MAX + 1];
@@ -349,8 +350,6 @@ STATIC mp_obj_t littlefs_vfs_getcwd(mp_obj_t vfs_in) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(littlefs_vfs_getcwd_obj, littlefs_vfs_getcwd);
 
-/// \function stat(path)
-/// Get the status of a file or directory.
 STATIC mp_obj_t littlefs_vfs_stat(mp_obj_t vfs_in, mp_obj_t path_in) {
     mp_obj_littlefs_vfs_t *self = MP_OBJ_TO_PTR(vfs_in);
     const char *path = mp_obj_str_get_str(path_in);
@@ -469,7 +468,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_3(littlefs_vfs_mount_obj, littlefs_vfs_mount);
 
 STATIC mp_obj_t littlefs_vfs_umount(mp_obj_t self_in) {
     (void)self_in;
-    // keep the FAT filesystem mounted internally so the VFS methods can still be used
+    // keep the filesystem mounted internally so the VFS methods can still be used
     return mp_const_none;
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(littlefs_vfs_umount_obj, littlefs_vfs_umount);
