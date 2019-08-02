@@ -1,8 +1,9 @@
-ESPIDF = /home/ironsst/workspace/esp-idf
-PORT = /dev/ttyUSB2
+DEV_HOME=/home/stephen/workspace
+ESPIDF=$(DEV_HOME)/esp-idf
+PORT ?= /dev/ttyUSB0
 #FLASH_MODE = qio
 #FLASH_SIZE = 4MB
-CROSS_COMPILE = /opt/xtensa-esp32-elf-linux64-1.22.0-80-g6c4433a-5.2.0/xtensa-esp32-elf/bin/xtensa-esp32-elf-
+CROSS_COMPILE = $(DEV_HOME)/esp/xtensa-esp32-elf/bin/xtensa-esp32-elf-
 SDKCONFIG = boards/sdkconfig.m5stack
 
 include Makefile
