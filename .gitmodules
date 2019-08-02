@@ -27,3 +27,6 @@
 [submodule "lib/tinyusb"]
 	path = lib/tinyusb
 	url = https://github.com/hathach/tinyusb
+[submodule "lib/littlefs"]
+	path = lib/littlefs
+	url = https://github.com/ARMmbed/littlefs
