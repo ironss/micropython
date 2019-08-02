@@ -6,6 +6,7 @@ QSTR_DEFS = qstrdefsport.h
 MICROPY_PY_USSL = 0
 MICROPY_SSL_AXTLS = 0
 MICROPY_FATFS = 1
+MICROPY_LITTLEFS = 1
 MICROPY_PY_BTREE = 1
 
 #FROZEN_DIR = scripts
@@ -217,6 +218,12 @@ ifeq ($(MICROPY_FATFS), 1)
 LIB_SRC_C += \
 	lib/oofatfs/ff.c \
 	lib/oofatfs/ffunicode.c
+endif
+
+ifeq ($(MICROPY_LITTLEFS), 1)
+LIB_SRC_C += \
+	lib/littlefs/lfs.c \
+	lib/littlefs/lfs_util.c
 endif
 
 DRIVERS_SRC_C = $(addprefix drivers/,\
