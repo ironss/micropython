@@ -37,10 +37,16 @@
 #include "py/mphal.h"
 #include "extmod/misc.h"
 #include "extmod/vfs.h"
-#include "extmod/vfs_fat.h"
-#include "genhdr/mpversion.h"
 
-extern const mp_obj_type_t mp_fat_vfs_type;
+#if MICROPY_VFS_FAT
+#include "extmod/vfs_fat.h"
+#endif
+
+#if MICROPY_VFS_LITTLEFS
+#include "extmod/vfs_littlefs.h"
+#endif
+
+#include "genhdr/mpversion.h"
 
 STATIC const qstr os_uname_info_fields[] = {
     MP_QSTR_sysname, MP_QSTR_nodename,
@@ -122,6 +128,9 @@ STATIC const mp_rom_map_elem_t os_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_umount), MP_ROM_PTR(&mp_vfs_umount_obj) },
     #if MICROPY_VFS_FAT
     { MP_ROM_QSTR(MP_QSTR_VfsFat), MP_ROM_PTR(&mp_fat_vfs_type) },
+    #endif
+    #if MICROPY_VFS_LITTLEFS
+    { MP_ROM_QSTR(MP_QSTR_VfsLittleFS), MP_ROM_PTR(&mp_littlefs_vfs_type) },
     #endif
     #endif
 };

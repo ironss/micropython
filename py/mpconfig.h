@@ -762,6 +762,10 @@ typedef double mp_float_t;
 #define MICROPY_VFS_FAT (0)
 #endif
 
+#ifndef MICROPY_VFS
+#define MICROPY_VFS_LITTLEFS (0)
+#endif
+
 /*****************************************************************************/
 /* Fine control over Python builtins, classes, modules, etc                  */
 
