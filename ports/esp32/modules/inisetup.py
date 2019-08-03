@@ -1,9 +1,9 @@
 import uos
-from flashbdev import bdev
+from flashbdev import bdev0
 
 def check_bootsec():
     buf = bytearray(bdev.SEC_SIZE)
-    bdev.readblocks(0, buf)
+    bdev0.readblocks(0, buf)
     empty = True
     for b in buf:
         if b != 0xff:
@@ -27,8 +27,8 @@ by firmware programming).
 def setup():
     check_bootsec()
     print("Performing initial setup")
-    uos.VfsFat.mkfs(bdev)
-    vfs = uos.VfsFat(bdev)
+    uos.VfsFat.mkfs(bdev0)
+    vfs = uos.VfsFat(bdev0)
     uos.mount(vfs, '/flash')
     uos.chdir('/flash')
     with open("boot.py", "w") as f:
