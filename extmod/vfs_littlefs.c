@@ -3,7 +3,9 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2019 Stephen Irons
+ * Copyright (c) 2014 Damien P. George
+ * Copyright (c) 2016 Paul Sokolovsky
+ * Copyright (c) 2019 Brush Technology
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +36,9 @@
 #include <string.h>
 #include "py/runtime.h"
 #include "py/mperrno.h"
+#include "py/objarray.h"
+#include "py/binary.h"
+
 #include "extmod/vfs_littlefs.h"
 #include "lib/littlefs/lfs.h"
 
@@ -42,11 +47,13 @@
 #include "extmod/vfs.h"
 
 
+
 typedef struct _fs_user_mount_t {
     mp_obj_base_t base;
     uint16_t flags;
-    mp_obj_t readblocks[4];
-    mp_obj_t writeblocks[4];
+    mp_obj_t read[5];
+    mp_obj_t write[5];
+    mp_obj_t erase[3];
     // new protocol uses just ioctl, old uses sync (optional) and count
     union {
         mp_obj_t ioctl[4];
@@ -55,9 +62,55 @@ typedef struct _fs_user_mount_t {
             mp_obj_t count[2];
         } old;
     } u;
+    lfs_size_t block_size;
+    lfs_size_t block_count;
+    lfs_size_t start_block;
     lfs_t lfs;
+    struct lfs_config lfs_config;
 } fs_user_mount_t;
 #define mp_obj_littlefs_vfs_t fs_user_mount_t
+
+#define FSUSER_NATIVE       (0x0001) // readblocks[2]/writeblocks[2] contain native func
+#define FSUSER_FREE_OBJ     (0x0002) // fs_user_mount_t obj should be freed on umount
+#define FSUSER_HAVE_IOCTL   (0x0004) // new protocol with ioctl
+#define FSUSER_NO_FILESYSTEM (0x0008) // the block device has no filesystem on it
+
+
+int lfs_io_bdev_read(const struct lfs_config *c, lfs_block_t block, lfs_off_t off, void *buffer, lfs_size_t size)
+{
+    fs_user_mount_t *vfs = c->context;
+    mp_obj_array_t ar = {{&mp_type_bytearray}, BYTEARRAY_TYPECODE, 0, size, buffer};
+    vfs->read[2] = MP_OBJ_NEW_SMALL_INT(block);
+    vfs->read[3] = MP_OBJ_NEW_SMALL_INT(off);
+    vfs->read[4] = MP_OBJ_FROM_PTR(&ar);
+    mp_call_method_n_kw(3, 0, vfs->read);
+    return LFS_ERR_OK;
+}
+
+int lfs_io_bdev_prog(const struct lfs_config *c, lfs_block_t block, lfs_off_t off, const void *buffer, lfs_size_t size)
+{
+    fs_user_mount_t *vfs = c->context;
+    mp_obj_array_t ar = {{&mp_type_bytearray}, BYTEARRAY_TYPECODE, 0, size, (void *)buffer};
+    vfs->write[2] = MP_OBJ_NEW_SMALL_INT(block);
+    vfs->write[3] = MP_OBJ_NEW_SMALL_INT(off);
+    vfs->write[4] = MP_OBJ_FROM_PTR(&ar);
+    mp_call_method_n_kw(3, 0, vfs->write);
+    return LFS_ERR_OK;
+}
+
+ int lfs_io_bdev_erase(const struct lfs_config *c, lfs_block_t block)
+ {
+     fs_user_mount_t *vfs = c->context;
+     vfs->erase[2] = MP_OBJ_NEW_SMALL_INT(block);
+     mp_call_method_n_kw(1, 0, vfs->erase);
+     return LFS_ERR_OK;
+ }
+
+int lfs_io_bdev_sync(const struct lfs_config *c)
+{
+    return LFS_ERR_OK;
+}
+
 
 
 static int lfserr_to_errno(int lfserr) {
@@ -91,13 +144,12 @@ STATIC mp_obj_t littlefs_vfs_make_new(const mp_obj_type_t *type, size_t n_args, 
     // create new object
     fs_user_mount_t *vfs = m_new_obj(fs_user_mount_t);
     vfs->base.type = type;
-#if 0
     vfs->flags = FSUSER_FREE_OBJ;
-    vfs->fatfs.drv = vfs;
 
     // load block protocol methods
-    mp_load_method(args[0], MP_QSTR_readblocks, vfs->readblocks);
-    mp_load_method_maybe(args[0], MP_QSTR_writeblocks, vfs->writeblocks);
+    mp_load_method(args[0], MP_QSTR_read, vfs->read);
+    mp_load_method_maybe(args[0], MP_QSTR_write, vfs->write);
+    mp_load_method_maybe(args[0], MP_QSTR_erase, vfs->erase);
     mp_load_method_maybe(args[0], MP_QSTR_ioctl, vfs->u.ioctl);
     if (vfs->u.ioctl[0] != MP_OBJ_NULL) {
         // device supports new block protocol, so indicate it
@@ -108,15 +160,36 @@ STATIC mp_obj_t littlefs_vfs_make_new(const mp_obj_type_t *type, size_t n_args, 
         mp_load_method(args[0], MP_QSTR_count, vfs->u.old.count);
     }
 
+    vfs->start_block = mp_obj_int_get_checked(mp_load_attr(args[0], MP_QSTR_start_block));
+    vfs->block_count = mp_obj_int_get_checked(mp_load_attr(args[0], MP_QSTR_block_count));
+    vfs->block_size = mp_obj_int_get_checked(mp_load_attr(args[0], MP_QSTR_block_size));
+
+    vfs->lfs_config.context = vfs;
+    vfs->lfs_config.read = lfs_io_bdev_read;
+    vfs->lfs_config.prog = lfs_io_bdev_prog;
+    vfs->lfs_config.erase = lfs_io_bdev_erase;
+    vfs->lfs_config.sync = lfs_io_bdev_sync;
+    vfs->lfs_config.read_size = vfs->block_size;
+    vfs->lfs_config.prog_size = vfs->block_size;
+    vfs->lfs_config.block_size = vfs->block_size;
+    vfs->lfs_config.block_count = vfs->block_count;
+    vfs->lfs_config.block_cycles = mp_obj_int_get_checked(mp_load_attr(args[0], MP_QSTR_block_cycles));
+    vfs->lfs_config.cache_size = mp_obj_int_get_checked(mp_load_attr(args[0], MP_QSTR_cache_size));
+    vfs->lfs_config.lookahead_size = mp_obj_int_get_checked(mp_load_attr(args[0], MP_QSTR_lookahead_size));
+    vfs->lfs_config.read_buffer = 0;
+    vfs->lfs_config.prog_buffer = 0;
+    vfs->lfs_config.lookahead_buffer = 0;
+    vfs->lfs_config.name_max = 0;  // Default to LFS_NAME_MAX
+    vfs->lfs_config.file_max = 0;  // Default to LFS_FILE_MAX
+    vfs->lfs_config.attr_max = 0;  // Default to LFS_ATTR_MAX
+
     // mount the block device so the VFS methods can be used
-    FRESULT res = f_mount(&vfs->fatfs);
-    if (res == FR_NO_FILESYSTEM) {
-        // don't error out if no filesystem, to let mkfs()/mount() create one if wanted
+    int err = lfs_mount(&vfs->lfs, &vfs->lfs_config);
+    if (err != LFS_ERR_OK) {
+        // don't error out if no filesystem, to let mkfs() or mount() create one if wanted
         vfs->flags |= FSUSER_NO_FILESYSTEM;
-    } else if (res != FR_OK) {
-        mp_raise_OSError(fresult_to_errno_table[res]);
     }
-#endif
+
     return MP_OBJ_FROM_PTR(vfs);
 }
 
@@ -136,18 +209,12 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(littlefs_vfs_del_obj, littlefs_vfs_del);
 STATIC mp_obj_t littlefs_vfs_mkfs(mp_obj_t bdev_in) {
     // create new object
     fs_user_mount_t *vfs = MP_OBJ_TO_PTR(littlefs_vfs_make_new(&mp_littlefs_vfs_type, 1, 0, &bdev_in));
-    (void)vfs;
-#if 0
-    // make the filesystem
-    uint8_t working_buf[FF_MAX_SS];
-    FRESULT res = f_mkfs(&vfs->fatfs, FM_FAT | FM_SFD, 0, working_buf, sizeof(working_buf));
-    if (res == FR_MKFS_ABORTED) { // Probably doesn't support FAT16
-        res = f_mkfs(&vfs->fatfs, FM_FAT32, 0, working_buf, sizeof(working_buf));
+
+    int err;
+    err = lfs_format(&vfs->lfs, &vfs->lfs_config);
+    if (err != LFS_ERR_OK) {
+        mp_raise_OSError(lfserr_to_errno(err));
     }
-    if (res != FR_OK) {
-        mp_raise_OSError(fresult_to_errno_table[res]);
-    }
-#endif
 
     return mp_const_none;
 }
@@ -158,33 +225,37 @@ typedef struct _mp_littlefs_vfs_ilistdir_it_t {
     mp_obj_base_t base;
     mp_fun_1_t iternext;
     bool is_str;
-//    FF_DIR dir;
+    lfs_t * lfs;
+    lfs_dir_t dir;
 } mp_littlefs_vfs_ilistdir_it_t;
 
 STATIC mp_obj_t mp_littlefs_vfs_ilistdir_it_iternext(mp_obj_t self_in) {
     mp_littlefs_vfs_ilistdir_it_t *self = MP_OBJ_TO_PTR(self_in);
 
-    (void)self;
-#if 0
     for (;;) {
-        FILINFO fno;
-        FRESULT res = f_readdir(&self->dir, &fno);
-        char *fn = fno.fname;
-        if (res != FR_OK || fn[0] == 0) {
-            // stop on error or end of dir
+        struct lfs_info info;
+        int err = lfs_dir_read(self->lfs, &self->dir, &info);
+        char * fname = info.name;
+        if (err == LFS_ERR_OK) {  // End of directory
             break;
         }
+        if (err < 0) {  // Error
+            lfs_dir_close(self->lfs, &self->dir);
+            mp_raise_OSError(lfserr_to_errno(err));
+        }
 
-        // Note that FatFS already filters . and .., so we don't need to
+        // Ignore '.' and '..'
+        if (fname[0] == '.' && ((fname[1] == '.' && fname[2] == 0) || fname[1] == 0))
+            continue;
 
-        // make 4-tuple with info about this entry
+        // Make 4-tuple with info about this entry
         mp_obj_tuple_t *t = MP_OBJ_TO_PTR(mp_obj_new_tuple(4, NULL));
         if (self->is_str) {
-            t->items[0] = mp_obj_new_str(fn, strlen(fn));
+            t->items[0] = mp_obj_new_str(fname, strlen(fname));
         } else {
-            t->items[0] = mp_obj_new_bytes((const byte*)fn, strlen(fn));
+            t->items[0] = mp_obj_new_bytes((const byte*)fname, strlen(fname));
         }
-        if (fno.fattrib & AM_DIR) {
+        if (info.type == LFS_TYPE_DIR) {
             // dir
             t->items[1] = MP_OBJ_NEW_SMALL_INT(MP_S_IFDIR);
         } else {
@@ -192,14 +263,12 @@ STATIC mp_obj_t mp_littlefs_vfs_ilistdir_it_iternext(mp_obj_t self_in) {
             t->items[1] = MP_OBJ_NEW_SMALL_INT(MP_S_IFREG);
         }
         t->items[2] = MP_OBJ_NEW_SMALL_INT(0); // no inode number
-        t->items[3] = mp_obj_new_int_from_uint(fno.fsize);
+        t->items[3] = mp_obj_new_int_from_uint(info.size);
 
         return MP_OBJ_FROM_PTR(t);
-    }
-
+}
     // ignore error because we may be closing a second time
-    f_closedir(&self->dir);
-#endif
+    lfs_dir_close(self->lfs, &self->dir);
 
     return MP_OBJ_STOP_ITERATION;
 }
@@ -223,15 +292,12 @@ STATIC mp_obj_t littlefs_vfs_ilistdir_func(size_t n_args, const mp_obj_t *args) 
     iter->base.type = &mp_type_polymorph_iter;
     iter->iternext = mp_littlefs_vfs_ilistdir_it_iternext;
     iter->is_str = is_str_type;
+    iter->lfs = &self->lfs;
     
-    (void)self;
-    (void)path;
-#if 0
-    FRESULT res = f_opendir(&self->fatfs, &iter->dir, path);
-    if (res != FR_OK) {
-        mp_raise_OSError(fresult_to_errno_table[res]);
+    int err = lfs_dir_open(&self->lfs, &iter->dir, path);
+    if (err != LFS_ERR_OK) {
+        mp_raise_OSError(lfserr_to_errno(err));
     }
-#endif
 
     return MP_OBJ_FROM_PTR(iter);
 }
@@ -446,23 +512,28 @@ STATIC mp_obj_t littlefs_vfs_mount(mp_obj_t self_in, mp_obj_t readonly, mp_obj_t
     //  1. readonly=True keyword argument
     //  2. nonexistent writeblocks method (then writeblocks[0] == MP_OBJ_NULL already)
     if (mp_obj_is_true(readonly)) {
-        self->writeblocks[0] = MP_OBJ_NULL;
+        self->write[0] = MP_OBJ_NULL;
     }
 
-#if 0
-    // check if we need to make the filesystem
-    FRESULT res = (self->flags & FSUSER_NO_FILESYSTEM) ? FR_NO_FILESYSTEM : FR_OK;
-    if (res == FR_NO_FILESYSTEM && mp_obj_is_true(mkfs)) {
-        uint8_t working_buf[FF_MAX_SS];
-        res = f_mkfs(&self->fatfs, FM_FAT | FM_SFD, 0, working_buf, sizeof(working_buf));
+    // If there is no filesystem, and we need to make one, then do so...
+    if ((self->flags & FSUSER_NO_FILESYSTEM) && mp_obj_is_true(mkfs)) {
+        int err;
+        err = lfs_format(&self->lfs, &self->lfs_config);
+        if (err != LFS_ERR_OK) {
+            mp_raise_OSError(lfserr_to_errno(err));
+        }
     }
-    if (res != FR_OK) {
-        mp_raise_OSError(fresult_to_errno_table[res]);
+
+    // Mount the filesystem
+    int err = lfs_mount(&self->lfs, &self->lfs_config);
+    if (err != LFS_ERR_OK) {
+        mp_raise_OSError(lfserr_to_errno(err));
     }
+
     self->flags &= ~FSUSER_NO_FILESYSTEM;
-#endif
-
     return mp_const_none;
+
+
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_3(littlefs_vfs_mount_obj, littlefs_vfs_mount);
 

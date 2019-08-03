@@ -29,7 +29,9 @@
 
 #include "py/runtime.h"
 #include "py/objstr.h"
+#include "py/obj.h"
 #include "py/mperrno.h"
+
 #include "extmod/vfs.h"
 
 #if MICROPY_VFS
@@ -40,6 +42,10 @@
 
 #if MICROPY_VFS_POSIX
 #include "extmod/vfs_posix.h"
+#endif
+
+#if MICROPY_VFS_LITTLEFS
+#include "extmod/vfs_littlefs.h"
 #endif
 
 // For mp_vfs_proxy_call, the maximum number of additional args that can be passed.
@@ -157,10 +163,11 @@ mp_import_stat_t mp_vfs_import_stat(const char *path) {
 }
 
 mp_obj_t mp_vfs_mount(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
-    enum { ARG_readonly, ARG_mkfs };
+    enum { ARG_readonly, ARG_mkfs, ARG_fstype };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_readonly, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_PTR(&mp_const_false_obj)} },
         { MP_QSTR_mkfs, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_PTR(&mp_const_false_obj)} },
+        { MP_QSTR_fstype, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_PTR(&mp_const_none_obj)} },
     };
 
     // parse args
@@ -179,8 +186,16 @@ mp_obj_t mp_vfs_mount(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args
         // Input object has no mount method, assume it's a block device and try to
         // auto-detect the filesystem and create the corresponding VFS entity.
         // (At the moment we only support FAT filesystems.)
+        mp_obj_t fstype_obj = args[ARG_fstype].u_obj;
         #if MICROPY_VFS_FAT
-        vfs_obj = mp_fat_vfs_type.make_new(&mp_fat_vfs_type, 1, 0, &vfs_obj);
+        if (!mp_obj_is_true(fstype_obj)) {
+            vfs_obj = mp_fat_vfs_type.make_new(&mp_fat_vfs_type, 1, 0, &vfs_obj);
+        }
+        #endif
+        #if MICROPY_VFS_LITTLEFS
+        if (mp_obj_is_true(fstype_obj)) {
+            vfs_obj = mp_littlefs_vfs_type.make_new(&mp_littlefs_vfs_type, 1, 0, &vfs_obj);
+        }
         #endif
     }
 
