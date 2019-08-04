@@ -420,53 +420,33 @@ STATIC mp_obj_t littlefs_vfs_stat(mp_obj_t vfs_in, mp_obj_t path_in) {
     mp_obj_littlefs_vfs_t *self = MP_OBJ_TO_PTR(vfs_in);
     const char *path = mp_obj_str_get_str(path_in);
 
-    (void)self;
-    (void)path;
-#if 0
-    FILINFO fno;
-    if (path[0] == 0 || (path[0] == '/' && path[1] == 0)) {
-        // stat root directory
-        fno.fsize = 0;
-        fno.fdate = 0x2821; // Jan 1, 2000
-        fno.ftime = 0;
-        fno.fattrib = AM_DIR;
-    } else {
-        FRESULT res = f_stat(&self->fatfs, path, &fno);
-        if (res != FR_OK) {
-            mp_raise_OSError(fresult_to_errno_table[res]);
-        }
-    }
+    int err;
+    struct lfs_info info;
 
-    mp_obj_tuple_t *t = MP_OBJ_TO_PTR(mp_obj_new_tuple(10, NULL));
+    err = lfs_stat(&self->lfs, path, &info);
+    if (err != LFS_ERR_OK) {
+        mp_raise_OSError(lfserr_to_errno(err));
+    }
     mp_int_t mode = 0;
-    if (fno.fattrib & AM_DIR) {
+    if (info.type == LFS_TYPE_DIR) {
         mode |= MP_S_IFDIR;
     } else {
         mode |= MP_S_IFREG;
     }
-    mp_int_t seconds = timeutils_seconds_since_2000(
-        1980 + ((fno.fdate >> 9) & 0x7f),
-        (fno.fdate >> 5) & 0x0f,
-        fno.fdate & 0x1f,
-        (fno.ftime >> 11) & 0x1f,
-        (fno.ftime >> 5) & 0x3f,
-        2 * (fno.ftime & 0x1f)
-    );
+
+    mp_obj_tuple_t *t = MP_OBJ_TO_PTR(mp_obj_new_tuple(10, NULL));
     t->items[0] = MP_OBJ_NEW_SMALL_INT(mode); // st_mode
     t->items[1] = MP_OBJ_NEW_SMALL_INT(0); // st_ino
     t->items[2] = MP_OBJ_NEW_SMALL_INT(0); // st_dev
     t->items[3] = MP_OBJ_NEW_SMALL_INT(0); // st_nlink
     t->items[4] = MP_OBJ_NEW_SMALL_INT(0); // st_uid
     t->items[5] = MP_OBJ_NEW_SMALL_INT(0); // st_gid
-    t->items[6] = mp_obj_new_int_from_uint(fno.fsize); // st_size
-    t->items[7] = MP_OBJ_NEW_SMALL_INT(seconds); // st_atime
-    t->items[8] = MP_OBJ_NEW_SMALL_INT(seconds); // st_mtime
-    t->items[9] = MP_OBJ_NEW_SMALL_INT(seconds); // st_ctime
+    t->items[6] = mp_obj_new_int_from_uint(info.size); // st_size
+    t->items[7] = MP_OBJ_NEW_SMALL_INT(0); // st_atime
+    t->items[8] = MP_OBJ_NEW_SMALL_INT(0); // st_mtime
+    t->items[9] = MP_OBJ_NEW_SMALL_INT(0 ); // st_ctime
 
     return MP_OBJ_FROM_PTR(t);
-#endif
-
-    return mp_const_none;
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_2(littlefs_vfs_stat_obj, littlefs_vfs_stat);
 
@@ -475,32 +455,26 @@ STATIC mp_obj_t littlefs_vfs_statvfs(mp_obj_t vfs_in, mp_obj_t path_in) {
     mp_obj_littlefs_vfs_t *self = MP_OBJ_TO_PTR(vfs_in);
     (void)path_in;
 
-    (void)self;
-#if 0
-    DWORD nclst;
-    FATFS *fatfs = &self->fatfs;
-    FRESULT res = f_getfree(fatfs, &nclst);
-    if (FR_OK != res) {
-        mp_raise_OSError(fresult_to_errno_table[res]);
+    lfs_ssize_t total_blocks = self->block_count;
+    lfs_ssize_t allocated_blocks = lfs_fs_size(&self->lfs);
+    if (allocated_blocks < 0) {
+        int err = allocated_blocks;
+        mp_raise_OSError(lfserr_to_errno(err));
     }
-
+    lfs_ssize_t free_blocks = total_blocks - allocated_blocks;
     mp_obj_tuple_t *t = MP_OBJ_TO_PTR(mp_obj_new_tuple(10, NULL));
-
-    t->items[0] = MP_OBJ_NEW_SMALL_INT(fatfs->csize * SECSIZE(fatfs)); // f_bsize
-    t->items[1] = t->items[0]; // f_frsize
-    t->items[2] = MP_OBJ_NEW_SMALL_INT((fatfs->n_fatent - 2)); // f_blocks
-    t->items[3] = MP_OBJ_NEW_SMALL_INT(nclst); // f_bfree
-    t->items[4] = t->items[3]; // f_bavail
-    t->items[5] = MP_OBJ_NEW_SMALL_INT(0); // f_files
-    t->items[6] = MP_OBJ_NEW_SMALL_INT(0); // f_ffree
-    t->items[7] = MP_OBJ_NEW_SMALL_INT(0); // f_favail
-    t->items[8] = MP_OBJ_NEW_SMALL_INT(0); // f_flags
-    t->items[9] = MP_OBJ_NEW_SMALL_INT(FF_MAX_LFN); // f_namemax
+    t->items[0] = MP_OBJ_NEW_SMALL_INT(self->block_size); // f_bsize - filesystem block size
+    t->items[1] = t->items[0]; // f_frsize - filesystem fragment size
+    t->items[2] = MP_OBJ_NEW_SMALL_INT(self->block_count); // f_blocks - size of filesystem in blocks
+    t->items[3] = MP_OBJ_NEW_SMALL_INT(free_blocks); // f_bfree - free blocks
+    t->items[4] = t->items[3]; // f_bavail - free blocks for unprivileged users
+    t->items[5] = MP_OBJ_NEW_SMALL_INT(0); // f_files - number of inodes
+    t->items[6] = MP_OBJ_NEW_SMALL_INT(0); // f_ffree - number of free inodes
+    t->items[7] = MP_OBJ_NEW_SMALL_INT(0); // f_favail - number of free inodes for unprivileged users
+    t->items[8] = MP_OBJ_NEW_SMALL_INT(0); // f_flags - mount flags
+    t->items[9] = MP_OBJ_NEW_SMALL_INT(LFS_NAME_MAX); // f_namemax - maximum filename length
 
     return MP_OBJ_FROM_PTR(t);
-#endif
-
-    return mp_const_none;
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_2(littlefs_vfs_statvfs_obj, littlefs_vfs_statvfs);
 
@@ -578,4 +552,3 @@ const mp_obj_type_t mp_littlefs_vfs_type = {
 };
 
 #endif // MICROPY_VFS_LITTLEFS
-
