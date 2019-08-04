@@ -11,7 +11,7 @@ if flashbdev.bdev0:
 
 if flashbdev.bdev1:
     try:
-        uos.mount(flashbdev.bdev1, '/lfs')
+        uos.mount(flashbdev.bdev1, '/lfs', fstype=uos.VfsLittleFS)
     except OSError:
         pass
 

@@ -70,4 +70,4 @@ else:
     bdev1_start_addr = bdev0_start_addr + bdev0_size_bytes
     bdev1_size_bytes = 2048 * 1024
     bdev1_block_size = 4096
-    bdev1 = FlashBdev_LFS(bdev1_start_addr, bdev1_size_bytes, bdev1_block_size)
+    bdev1 = FlashDev_LFS(bdev1_start_addr, bdev1_size_bytes, bdev1_block_size)
