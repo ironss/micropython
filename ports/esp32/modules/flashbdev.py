@@ -35,22 +35,22 @@ class FlashDev_LFS:
         self.lookahead_size = 32
 
     def read(self, block, offset, buf):
-        print("readflash: (%d %d %x(%d))" % (block, offset, id(buf), len(buf)))
+        #print("readflash: (%d %d %x(%d))" % (block, offset, id(buf), len(buf)))
         esp.flash_read(((self.start_block + block) * self.block_size) + offset, buf)
         #print(buf)
 
     def write(self, block, offset, buf):
-        print("writeflash: (%d %d %x(%d))" % (block, offset, id(buf), len(buf)))
+        #print("writeflash: (%d %d %x(%d))" % (block, offset, id(buf), len(buf)))
         assert(block < self.block_count)
         esp.flash_write(((self.start_block + block) * self.block_size) + offset, buf)
 
     def erase(self, block):
-        print("eraseblock %s" % (block))
+        #print("eraseblock %s" % (block))
         assert(block < self.block_count)
         esp.flash_erase(self.start_block + block)
     
     def ioctl(self, op, arg):
-        print("ioctl(%d, %r)" % (op, arg))
+        #print("ioctl(%d, %r)" % (op, arg))
         if op == 4:  # BP_IOCTL_SEC_COUNT
             return self.blocks
         if op == 5:  # BP_IOCTL_SEC_SIZE
