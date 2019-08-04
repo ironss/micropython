@@ -1,18 +1,23 @@
 import gc
 import uos
-import flashbdev
+import flashdev
 
-if flashbdev.bdev0:
+if flashdev.fdev0:
     try:
-        uos.mount(flashbdev.bdev0, '/fat')
+        uos.mount(flashdev.fdev0, '/', fstype=uos.VfsLittleFS)
     except OSError:
-        import inisetup
-        vfs = inisetup.setup()
-
-if flashbdev.bdev1:
-    try:
-        uos.mount(flashbdev.bdev1, '/', fstype=uos.VfsLittleFS)
-    except OSError:
-        pass
+        print("Performing initial setup")
+        uos.VfsLittleFS.mkfs(flashdev.fdev0)
+        vfs = uos.VfsFat(flashdev.fdev0)
+        uos.mount(vfs, '/flash')
+        uos.chdir('/flash')
+        with open('/flash/boot.py', 'w') as f:
+            f.write("""\
+# This file is executed on every boot (including wake-boot from deepsleep)
+#import esp
+#esp.osdebug(None)
+#import webrepl
+#webrepl.start()
+""")
 
 gc.collect()
