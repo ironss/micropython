@@ -28,8 +28,10 @@ class FlashDev_LFS:
         self.block_size = block_size
         self.start_block = start_addr // block_size
         self.block_count = size_bytes // block_size
+        self.write_size = 64
+        self.erase_size = 64
         self.block_cycles = 100
-        self.cache_size = block_size
+        self.cache_size = 1024
         self.lookahead_size = 32
 
     def read(self, block, offset, buf):

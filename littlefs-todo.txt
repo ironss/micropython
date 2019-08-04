@@ -54,4 +54,12 @@ it should try to autodetect, but the implementation just tries to mount
 at FAT filesystem.
 
 Otherwise, it should be a filesystem type (VfsLittleFS or VfsFat).
-  
+
+
+
+Questions
+=========
+
+* When writing, should we check that size actually written was what was requested?
+
+* When open with 'a' append flag, do we need to seek_set or does LFS do that?
