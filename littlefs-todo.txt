@@ -30,6 +30,16 @@ Tests
 * Use LFS as the boot filesystem
 
 
+IO device driver
+================
+
+The concept of a 'block device' does not mesh quite correctly with 
+flash storage. In a block device, read and write operations are
+
+In a flash device, the basic operations are read, write and erase.
+Each of these operates on a different sized block.
+ 
+
 VFS API changes
 ===============
 

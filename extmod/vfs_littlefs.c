@@ -76,7 +76,9 @@ typedef struct _fs_user_mount_t {
 #define FSUSER_NO_FILESYSTEM (0x0008) // the block device has no filesystem on it
 
 
-int lfs_io_bdev_read(const struct lfs_config *c, lfs_block_t block, lfs_off_t off, void *buffer, lfs_size_t size)
+// These functions should go into vfs_littlefs_io_fdev.c
+
+int lfs_io_fdev_read(const struct lfs_config *c, lfs_block_t block, lfs_off_t off, void *buffer, lfs_size_t size)
 {
     fs_user_mount_t *vfs = c->context;
     mp_obj_array_t ar = {{&mp_type_bytearray}, BYTEARRAY_TYPECODE, 0, size, buffer};
@@ -87,7 +89,7 @@ int lfs_io_bdev_read(const struct lfs_config *c, lfs_block_t block, lfs_off_t of
     return LFS_ERR_OK;
 }
 
-int lfs_io_bdev_prog(const struct lfs_config *c, lfs_block_t block, lfs_off_t off, const void *buffer, lfs_size_t size)
+int lfs_io_fdev_prog(const struct lfs_config *c, lfs_block_t block, lfs_off_t off, const void *buffer, lfs_size_t size)
 {
     fs_user_mount_t *vfs = c->context;
     mp_obj_array_t ar = {{&mp_type_bytearray}, BYTEARRAY_TYPECODE, 0, size, (void *)buffer};
@@ -98,7 +100,7 @@ int lfs_io_bdev_prog(const struct lfs_config *c, lfs_block_t block, lfs_off_t of
     return LFS_ERR_OK;
 }
 
- int lfs_io_bdev_erase(const struct lfs_config *c, lfs_block_t block)
+ int lfs_io_fdev_erase(const struct lfs_config *c, lfs_block_t block)
  {
      fs_user_mount_t *vfs = c->context;
      vfs->erase[2] = MP_OBJ_NEW_SMALL_INT(block);
@@ -106,7 +108,7 @@ int lfs_io_bdev_prog(const struct lfs_config *c, lfs_block_t block, lfs_off_t of
      return LFS_ERR_OK;
  }
 
-int lfs_io_bdev_sync(const struct lfs_config *c)
+int lfs_io_fdev_sync(const struct lfs_config *c)
 {
     return LFS_ERR_OK;
 }
@@ -165,10 +167,10 @@ STATIC mp_obj_t littlefs_vfs_make_new(const mp_obj_type_t *type, size_t n_args, 
     vfs->block_size = mp_obj_int_get_checked(mp_load_attr(args[0], MP_QSTR_block_size));
 
     vfs->lfs_config.context = vfs;
-    vfs->lfs_config.read = lfs_io_bdev_read;
-    vfs->lfs_config.prog = lfs_io_bdev_prog;
-    vfs->lfs_config.erase = lfs_io_bdev_erase;
-    vfs->lfs_config.sync = lfs_io_bdev_sync;
+    vfs->lfs_config.read = lfs_io_fdev_read;
+    vfs->lfs_config.prog = lfs_io_fdev_prog;
+    vfs->lfs_config.erase = lfs_io_fdev_erase;
+    vfs->lfs_config.sync = lfs_io_fdev_sync;
     vfs->lfs_config.read_size = vfs->block_size;
     vfs->lfs_config.prog_size = vfs->block_size;
     vfs->lfs_config.block_size = vfs->block_size;
