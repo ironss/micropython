@@ -173,7 +173,7 @@ STATIC mp_obj_t littlefs_vfs_make_new(const mp_obj_type_t *type, size_t n_args, 
     vfs->lfs_config.prog = lfs_io_fdev_prog;
     vfs->lfs_config.erase = lfs_io_fdev_erase;
     vfs->lfs_config.sync = lfs_io_fdev_sync;
-    vfs->lfs_config.read_size = mp_obj_int_get_checked(mp_load_attr(args[0], MP_QSTR_erase_size));
+    vfs->lfs_config.read_size = mp_obj_int_get_checked(mp_load_attr(args[0], MP_QSTR_read_size));
     vfs->lfs_config.prog_size = mp_obj_int_get_checked(mp_load_attr(args[0], MP_QSTR_write_size));
     vfs->lfs_config.block_size = vfs->block_size;
     vfs->lfs_config.block_count = vfs->block_count;
