@@ -28,3 +28,20 @@ Tests
 
 * Verify basic read/write operations
 * Use LFS as the boot filesystem
+
+
+VFS API changes
+===============
+
+When first mounting a filesystem, there is no good way to tell the system
+what type of filesystem it should be. Also, autodetection is not particularly
+good. At this stage, it is probably better to allow the caller to pass in the
+type of filesystem as a parameter.
+
+os.mount() (or C function vfs_mount()) now accepts an additional optional 
+keyword-only parameter fstype. The default value is 'None', in which case
+it should try to autodetect, but the implementation just tries to mount
+at FAT filesystem.
+
+Otherwise, it should be a filesystem type (VfsLittleFS or VfsFat).
+  
