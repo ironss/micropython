@@ -118,7 +118,7 @@ int lfs_io_fdev_sync(const struct lfs_config *c)
 
 // Mapping from LFS error to POSIX errno
 static int lfserr_to_errno(int lfserr) {
-    return lfserr;
+    return -lfserr;
 }
 
 
@@ -566,6 +566,7 @@ extern const mp_obj_type_t mp_type_vfs_littlefs_textio;
 
 typedef struct _pyb_file_obj_t {
     mp_obj_base_t base;
+    bool is_open;
     lfs_t * lfsp;
     lfs_file_t lfile;
 } pyb_file_obj_t;
@@ -633,10 +634,13 @@ STATIC mp_uint_t file_obj_ioctl(mp_obj_t o_in, mp_uint_t request, uintptr_t arg,
         return 0;
 
     } else if (request == MP_STREAM_CLOSE) {
-        int err = lfs_file_close(self->lfsp, &self->lfile);
-        if (err < 0) {
-            *errcode = lfserr_to_errno(err);
-            return MP_STREAM_ERROR;
+        if (self->is_open) {
+            int err = lfs_file_close(self->lfsp, &self->lfile);
+            if (err < 0) {
+                *errcode = lfserr_to_errno(err);
+                return MP_STREAM_ERROR;
+            }
+            self->is_open = false;
         }
         return 0;
 
@@ -690,6 +694,7 @@ STATIC mp_obj_t file_open(fs_user_mount_t *vfs, const mp_obj_type_t *type, mp_ar
     pyb_file_obj_t *o = m_new_obj_with_finaliser(pyb_file_obj_t);
     o->base.type = type;
     o->lfsp = &vfs->lfs;
+    o->is_open = false;
 
     const char *fname = mp_obj_str_get_str(args[0].u_obj);
     assert(vfs != NULL);
@@ -699,6 +704,7 @@ STATIC mp_obj_t file_open(fs_user_mount_t *vfs, const mp_obj_type_t *type, mp_ar
         m_del_obj(pyb_file_obj_t, o);
         mp_raise_OSError(lfserr_to_errno(err));
     }
+    o->is_open = true;
 
     return MP_OBJ_FROM_PTR(o);
 }
