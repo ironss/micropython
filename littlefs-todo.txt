@@ -10,24 +10,13 @@ Functions to implement
 * del
   Not sure what this is for, but it is only enabled if FS_REENTRANT is set.
 
-File operations
----------------
-* stream_read
-* stream_readinto
-* stream_unbuffered_readline
-* stream_unbuffered_readlines
-* stream_write
-* stream_flush
-* stream_close
-* stream_seek
-* stream_tell
-
 
 Tests
 =====
 
-* Verify basic read/write operations
-* Use LFS as the boot filesystem
+* Proper verification of all functions
+* Measure performance
+* Verify behaviour over unexpected restart
 
 
 IO device driver
@@ -56,10 +45,29 @@ at FAT filesystem.
 Otherwise, it should be a filesystem type (VfsLittleFS or VfsFat).
 
 
-
 Questions
 =========
 
 * When writing, should we check that size actually written was what was requested?
 
 * When open with 'a' append flag, do we need to seek_set or does LFS do that?
+
+* Why does LittleFS assert:
+
+LFS asserts
+2473   lfs_file_close      LFS_ASSERT(file->flags & LFS_F_OPENED);
+2496   lfs_file_relocate   LFS_ASSERT(file->flags & LFS_F_OPENED);
+2579   lfs_file_flush      LFS_ASSERT(file->flags & LFS_F_OPENED);
+2660   lfs_file_sync       LFS_ASSERT(file->flags & LFS_F_OPENED);
+2728   lfs_file_read       LFS_ASSERT(file->flags & LFS_F_OPENED);
+2729   lfs_file_read       LFS_ASSERT((file->flags & 3) != LFS_O_WRONLY);
+2808   lfs_file_write      LFS_ASSERT(file->flags & LFS_F_OPENED);
+2809   lfs_file_write      LFS_ASSERT((file->flags & 3) != LFS_O_RDONLY);
+2939   lfs_file_seek       LFS_ASSERT(file->flags & LFS_F_OPENED);
+2973   lfs_file_truncate   LFS_ASSERT(file->flags & LFS_F_OPENED);
+2974   lfs_file_truncate   LFS_ASSERT((file->flags & 3) != LFS_O_RDONLY);
+3037   lfs_file_tell       LFS_ASSERT(file->flags & LFS_F_OPENED);
+3045   lfs_file_rewind     **** NO ASSERT ****
+3056   lfs_file_size       LFS_ASSERT(file->flags & LFS_F_OPENED);
+
+I would think that returning an error code EBADF would be more appropriate
