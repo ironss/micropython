@@ -1,0 +1,30 @@
+Functions to implement
+======================
+
+* chdir
+* getcwd
+  LittleFS does not remember current directory. 
+  Add a member to mp_obj_littlefs_vfs_t to remember the current directory,
+  and append this to the path in every function that takes a path.
+
+* del
+  Not sure what this is for, but it is only enabled if FS_REENTRANT is set.
+
+File operations
+---------------
+* stream_read
+* stream_readinto
+* stream_unbuffered_readline
+* stream_unbuffered_readlines
+* stream_write
+* stream_flush
+* stream_close
+* stream_seek
+* stream_tell
+
+
+Tests
+=====
+
+* Verify basic read/write operations
+* Use LFS as the boot filesystem
